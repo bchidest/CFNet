@@ -1,0 +1,14 @@
+lr=.005
+n_classes=22
+batch_size=50
+max_steps=30000
+dropout_prob=0.8
+conv-re,n_filts=32,filt_size=3,n_rotations=8,bn=True
+conv-re,n_filts=32,filt_size=3,n_rotations=8,bn=True,pool=avg,pool_support=2,pool_stride=2
+conv-re,n_filts=32,filt_size=3,n_rotations=8,bn=True
+conv-re,n_filts=32,filt_size=3,n_rotations=4,bn=True,pool=avg,pool_support=2,pool_stride=2
+conv-re,n_filts=32,filt_size=3,n_rotations=4,bn=True
+conv-re,n_filts=32,filt_size=3,n_rotations=4,bn=True
+conv-re,n_filts=32,filt_size=3,n_rotations=4,bn=True
+dft,n_nodes=32,bn=True,n_rotations=4
+full,n_nodes=22
