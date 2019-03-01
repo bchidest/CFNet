@@ -15,8 +15,8 @@ import seaborn as sn
 import cPickle as pkl
 import random
 
-from cfnet import network
-from cfnet import data
+from ricnn import network
+from ricnn import data
 import cnn_params
 
 import os
@@ -108,8 +108,6 @@ def do_eval(sess,
 
     # Output will be of shape [# examples, # classes]
     y_dtype = 'float32'
-    #y_hat = np.zeros((num_examples,), dtype=y_dtype)
-    #y = np.zeros((num_examples,), dtype=y_dtype)
     y_hat = np.zeros((num_examples, data_set._n_classes), dtype=y_dtype)
     y = np.zeros((num_examples, data_set._n_classes), dtype=y_dtype)
 
@@ -128,11 +126,8 @@ def do_eval(sess,
             y_hat[step*batch_size: (step+1)*batch_size] = \
                 (logits_eval[:, 0] < (logits_eval[:, 1] + threshold_offset)).astype('uint8')
         else:
-            #y_hat[step*batch_size: (step+1)*batch_size] = \
-            #    np.argmax(logits_eval, axis=1)
             y_hat[step*batch_size: (step+1)*batch_size] = \
                 logits_eval
-        #y[step*batch_size: (step+1)*batch_size] = np.argmax(feed_dict[labels_placeholder], axis=1)
         y[step*batch_size: (step+1)*batch_size] = feed_dict[labels_placeholder]
     if remainder_step > 0:
         feed_dict = fill_feed_dict(data_set,
@@ -150,11 +145,8 @@ def do_eval(sess,
             y_hat[(step+1)*batch_size:] = \
                 (logits_eval[:, 0] < (logits_eval[:, 1] + threshold_offset)).astype('uint8')[0:remainder_step]
         else:
-            #y_hat[(step+1)*batch_size:] = \
-            #    np.argmax(logits_eval, axis=1)[0:remainder_step]
             y_hat[(step+1)*batch_size:] = \
                 logits_eval[0:remainder_step]
-        #y[(step+1)*batch_size:] = np.argmax(feed_dict[labels_placeholder][0:remainder_step], axis=1)
         y[(step+1)*batch_size:] = feed_dict[labels_placeholder][0:remainder_step]
 
     y_hat = sigmoid(y_hat)
@@ -163,8 +155,6 @@ def do_eval(sess,
                                  data_set._label_list,
                                  classes_to_merge, classes_to_ignore,
                                  show_cm_plot, metric)
-    #return prediction_evaluation(np.array(y_hat), np.array(y), data_set._n_classes,
-    #                             range(data_set._n_classes))
 
 
 def prediction_evaluation(y_hat, y, n_classes=2, label_list=[0, 1],
@@ -280,8 +270,6 @@ def train(param_filename, model_dir, summary_dir, data_train, data_valid,
           n_iterations=1, metric='accuracy',
           filename_suffix='',
           save_models=True, max_to_keep=0, save_summaries=True,
-          dft_flip=False, radial_split=False,
-          loss_function='cross_entropy',
           evaluate_interval=None,
           train_interval=None):
     '''Train the network.
@@ -335,16 +323,15 @@ def train(param_filename, model_dir, summary_dir, data_train, data_valid,
             is_training_placeholder = tf.placeholder(tf.bool)
             # Model configuration
             with tf.variable_scope("RiCNN") as scope:
-                pre_logits, n_nodes = network.inference(
-                        images_placeholder, params, input_size, input_depth,
-                        params.batch_size, data_train._n_classes,
-                        is_training_placeholder, keep_prob_placeholder)
-            logits = pre_logits
-#            logits = network.output_layer(pre_logits, params,
-#                                          data_train._n_classes,
-#                                          n_nodes)
+                logits = network.inference(images_placeholder, params,
+                                           input_size, input_depth,
+                                           params.batch_size,
+                                           is_training_placeholder,
+                                           keep_prob_placeholder,
+                                           True)
+            # Loss
             loss_ = network.loss(logits, labels_placeholder,
-                                 data_train._one_hot, loss_function)
+                                 data_train._one_hot)
             # Add regularization to loss
             loss_ = loss_ + tf.add_n(
                     tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
@@ -358,8 +345,8 @@ def train(param_filename, model_dir, summary_dir, data_train, data_valid,
             saver = tf.train.Saver(max_to_keep=max_to_keep)
             summary_op = tf.summary.merge_all()
 
-            total_params = 0
             # Check number of trainable params
+            total_params = 0
             for variable in tf.trainable_variables():
                 shape = variable.get_shape()
                 variable_parameters = 1
@@ -368,7 +355,7 @@ def train(param_filename, model_dir, summary_dir, data_train, data_valid,
                 total_params += variable_parameters
             print("Number of trainable parameters: %d" % (total_params))
 
-            # Train the same model several times
+            # Train the same model for n_iterations
             print('Starting session...')
             sess = tf.Session()
             for iteration in range(n_iterations):
@@ -390,7 +377,6 @@ def train(param_filename, model_dir, summary_dir, data_train, data_valid,
                     print('Initializing summary writer...')
                     summary_writer = tf.summary.FileWriter(
                             os.path.join(summary_dir, model_name), sess.graph)
-
                 if save_models:
                     saver.save(sess, os.path.join(model_dir, model_name),
                                global_step=0)
