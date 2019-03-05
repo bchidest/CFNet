@@ -15,8 +15,8 @@ import seaborn as sn
 import cPickle as pkl
 import random
 
-from ricnn import network
-from ricnn import data
+from cfnet import network
+from cfnet import data
 import cnn_params
 
 import os
@@ -238,7 +238,7 @@ def evaluate_on_dataset(model_filename, data_set,
             placeholder_inputs(params.batch_size, input_size, input_depth, data_set._n_classes)
         keep_prob_placeholder = tf.placeholder(tf.float32)
         is_training_placeholder = tf.placeholder(tf.bool)
-        with tf.variable_scope("RiCNN") as scope:
+        with tf.variable_scope("CFNet") as scope:
             pre_logits, n_nodes = network.inference(
                     images_placeholder, params, input_size, input_depth,
                     params.batch_size, data_set._n_classes,
