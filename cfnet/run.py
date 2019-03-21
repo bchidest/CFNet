@@ -238,7 +238,7 @@ def evaluate_on_dataset(model_filename, data_set,
             placeholder_inputs(params.batch_size, input_size, input_depth, data_set._n_classes)
         keep_prob_placeholder = tf.placeholder(tf.float32)
         is_training_placeholder = tf.placeholder(tf.bool)
-        with tf.variable_scope("CFNet") as scope:
+        with tf.variable_scope(''):
             pre_logits, n_nodes = network.inference(
                     images_placeholder, params, input_size, input_depth,
                     params.batch_size, data_set._n_classes,
@@ -322,13 +322,23 @@ def train(param_filename, model_dir, summary_dir, data_train, data_valid,
             keep_prob_placeholder = tf.placeholder(tf.float32)
             is_training_placeholder = tf.placeholder(tf.bool)
             # Model configuration
-            with tf.variable_scope("RiCNN") as scope:
+            with tf.variable_scope(''):
                 logits = network.inference(images_placeholder, params,
                                            input_size, input_depth,
                                            params.batch_size,
                                            is_training_placeholder,
+                                           True,
                                            keep_prob_placeholder,
                                            True)
+            # Validation model copy
+            with tf.variable_scope(tf.get_variable_scope(), reuse=True):
+                logits_valid = network.inference(images_placeholder, params,
+                                                 input_size, input_depth,
+                                                 params.batch_size,
+                                                 is_training_placeholder,
+                                                 False,
+                                                 keep_prob_placeholder,
+                                                 True)
             # Loss
             loss_ = network.loss(logits, labels_placeholder,
                                  data_train._one_hot)
@@ -435,7 +445,7 @@ def train(param_filename, model_dir, summary_dir, data_train, data_valid,
                         print("Step: " + str(step))
                         print('Validation Data Eval:')
                         results = do_eval(sess,
-                                          logits,
+                                          logits_valid,
                                           images_placeholder,
                                           labels_placeholder,
                                           is_training_placeholder,

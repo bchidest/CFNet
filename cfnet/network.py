@@ -240,7 +240,7 @@ class GBatchNorm_TF():
                                         trainable_param=False, initializer_param=one_init)
 
         if is_training:
-            mean, variance = tf.nn.moments(input, axis)
+            mean, variance = tf.nn.moments(x, axis)
             if group_input != 'Z2':
                 if group_input == 'C4':
                     num_repeat = 4
@@ -266,10 +266,10 @@ class GBatchNorm_TF():
                                   moving_variance * BN_DECAY + variance * (1 - BN_DECAY))
 
             with tf.control_dependencies([train_mean, train_var]):
-                return tf.nn.batch_normalization(input,
+                return tf.nn.batch_normalization(x,
                                                  mean, variance, beta, gamma, BN_EPSILON)
         else:
-            return tf.nn.batch_normalization(input, moving_mean, moving_variance, beta, gamma, BN_EPSILON)
+            return tf.nn.batch_normalization(x, moving_mean, moving_variance, beta, gamma, BN_EPSILON)
 
 
 def conic_conv_layer(x, x_size, x_depth, layer_params, is_training,
@@ -320,8 +320,9 @@ def conic_conv_layer(x, x_size, x_depth, layer_params, is_training,
     return h, h_size
 
 
-def g_conv_layer(x, x_size, x_depth, group_input, layer_params,
+def g_conv_layer(x, x_size, x_depth, group_input, layer_params, is_training_bool,
                  activation=True, layer_name='g-conv'):
+    assert(layer_params.ge_type in ['C4', 'D4'])
     group_output = layer_params.ge_type
     gconv_indices, gconv_shape_info, w_shape =\
         gconv2d_util(h_input=group_input, h_output=group_output,
@@ -339,7 +340,15 @@ def g_conv_layer(x, x_size, x_depth, group_input, layer_params,
     # Batch normalization
     if layer_params.batch_norm:
         with tf.variable_scope(layer_name + '_bn'):
-            h = GBatchNorm(layer_params.ge_type)(h)
+            #h = GBatchNorm(layer_params.ge_type)(h)
+            bn = GBatchNorm_TF()
+            bn.make_var('bn', x_depth)
+            if layer_params.ge_type == 'C4':
+                h = bn.run(h, x_size, 4*layer_params.n_filters,
+                           layer_params.ge_type, is_training=is_training_bool)
+            else:
+                h = bn.run(h, x_size, 8*layer_params.n_filters,
+                           layer_params.ge_type, is_training=is_training_bool)
     # Pooling
     if layer_params.pooling:
         pool_sup = layer_params.pooling_support
@@ -436,7 +445,7 @@ def dft_transition(x, x_n_nodes, n_rotations):
 #    layer_fft_real = tf.real(layer_fft)
 #    layer_fft = tf.where(mask_abs, layer_fft_abs, layer_fft_real)
     # Normalize DFT output
-    x = x / (x_n_nodes*n_rotations)
+    x = x / x_n_nodes*n_rotations
     return x
 
 
@@ -448,7 +457,7 @@ def split_g_conv_rotations(x, x_size, x_depth):
 
 
 def dft_transition_with_rotations(x, x_size, x_depth, layer_params,
-                                  layer_name='conv-to-fc'):
+                                  is_training, layer_name='conv-to-fc'):
     with tf.name_scope(layer_name):
         # Inner product of input feature map with rotated weights
         weights = \
@@ -464,6 +473,11 @@ def dft_transition_with_rotations(x, x_size, x_depth, layer_params,
         variable_summaries(biases, layer_name + '/biases')
         biases = tf.tile(biases, [layer_params.n_rotations])
         h = conv2d(x, weights, 1) + biases
+        # Batch normalization
+        with tf.variable_scope(layer_name + '_bn'):
+            h = tf.contrib.layers.batch_norm(h, decay=0.95,
+                                             center=True, scale=True,
+                                             is_training=is_training)
         # Activation
         h = tf.nn.relu(h)
         # Output should be [batch_size, 1, 1, n_nodes*n_rotations], so squeeze
@@ -480,7 +494,7 @@ def dft_transition_with_rotations(x, x_size, x_depth, layer_params,
 
 
 def inference(x, params, input_size, input_depth, batch_size, is_training,
-              keep_prob, verbose=False):
+              is_training_bool, keep_prob, verbose=False):
     h = x
     h_size = input_size
     h_depth = input_depth
@@ -512,13 +526,15 @@ def inference(x, params, input_size, input_depth, batch_size, is_training,
                 else:
                     group_input = params.conv_layers[i - 1].ge_type
                 h, h_size = g_conv_layer(h, h_size, h_depth, group_input,
-                                         layer_params, activation, layer_name)
+                                         layer_params, is_training_bool,
+                                         activation, layer_name)
             # Standard Convolution
             else:
                 h, h_size = conv_layer(h, h_size, h_depth, layer_params,
                                        is_training, activation, layer_name)
             # Dropout
             h = tf.nn.dropout(h, keep_prob)
+
             h_depth = layer_params.n_filters
             tf.summary.histogram(layer_name + '/activations', h)
             if verbose:
@@ -536,7 +552,10 @@ def inference(x, params, input_size, input_depth, batch_size, is_training,
             # Calculate the width/height of the last conic conv feature map
             h = dft_transition_with_rotations(h, h_size,
                                               params.conv_layers[-1].n_filters,
-                                              layer_params, layer_name)
+                                              layer_params, is_training,
+                                              layer_name)
+            # Dropout
+            h = tf.nn.dropout(h, keep_prob)
             h_n_nodes = layer_params.n_nodes*layer_params.n_rotations
         # Else if G-convolution
         elif isinstance(params.conv_layers[-1], cnn_params.GEConvolutionalLayer):
@@ -553,6 +572,7 @@ def inference(x, params, input_size, input_depth, batch_size, is_training,
                                layer_params.n_rotations)
             h_n_nodes = params.conv_layers[-1].n_filters*layer_params.n_rotations
     else:
+        # Calculate number of nodes in h for subsequent fc layers
         h_n_nodes = h_size**2*params.conv_layers[-1].n_filters
         if isinstance(params.conv_layers[-1], cnn_params.GEConvolutionalLayer) \
                 and not params.conv_layers[-1].ge_pool:
@@ -587,6 +607,9 @@ def inference(x, params, input_size, input_depth, batch_size, is_training,
                          layer_name)
             tf.summary.histogram(layer_name + '/activations', h)
             h_n_nodes = layer_params.n_nodes
+        if i < n_fc_layers - 1:
+            # Dropout
+            h = tf.nn.dropout(h, keep_prob)
     return h
 
 
@@ -608,6 +631,7 @@ def loss(logits, labels, one_hot=False):
 def training(loss, global_step, learning_rate, decay_step):
     # Decay learning rate
     lr = tf.train.exponential_decay(learning_rate, global_step, decay_step, 0.95, staircase=True)
+    #lr = learning_rate
     tf.summary.scalar('learning_rate', lr)
     # Other optimizers could be inserted here
     train_step = tf.train.AdamOptimizer(lr).minimize(loss, global_step=global_step)
